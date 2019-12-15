@@ -36,16 +36,17 @@ def gen_zipper_df(df_zipper, df_status, primary_cols, status_cols, date):
                       .withColumn("expired_at",
                                   expr("if(_is_change and expired_at is null,'%s 23:59:59.9',expired_at)" % (
                                       datetime.strptime(date, "%Y%m%d").strftime("%Y-%m-%d"))))
-                      .filter("not (expired_at is null and not _is_change )")
+                      .filter("expired_at is not null")
                       .drop("_is_change")
                       )
     res_new_change = (
         df_status.join(df_zipper.filter("expired_at is null"), primary_cols, "left")
-            .filter(is_change)
-            .select(df_status["*"])
+            .withColumn("_is_change", is_change)
+            .select(df_status["*"], "_is_change",df_zipper['start_at'].alias("old_start"))
             .withColumn("start_at",
-                        lit((datetime.strptime(date, "%Y%m%d") + timedelta(1)).strftime("%Y-%m-%d") + " 00:00:00.0"))
-            .withColumn("expired_at", lit(None))
+                        expr("if(_is_change,'%s',old_start)"%((datetime.strptime(date, "%Y%m%d") + timedelta(1)).strftime("%Y-%m-%d") + " 00:00:00.0"))
+                        )
+            .withColumn("expired_at", lit(None)).drop("old_start").drop("_is_change")
     )
     return res_old_change.unionAll(res_new_change)
 
