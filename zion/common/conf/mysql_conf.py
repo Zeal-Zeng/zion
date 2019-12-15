@@ -6,7 +6,7 @@
 :Owner: zengzheng.zeal
 :Create time: 2019-11-28
 """
-from zion.conf import env
+import zion
 
 
 def _k_listv_2_v_k(m):
@@ -45,8 +45,9 @@ _db2instance = {
 
 def get_host_and_prop(db):
     """
+    通库名获取 host 和 相关连接信息
     :param db: 库名
     :return: host, {"user": ,"password":}
     """
-    host = _db2instance[env][db]
-    return host, _mysql_instance[env][host]
+    host = _db2instance[zion.env][db]
+    return host, _mysql_instance[zion.env][host]

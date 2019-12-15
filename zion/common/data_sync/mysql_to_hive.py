@@ -9,15 +9,18 @@
 
 from pyspark.sql.functions import lit
 from ..conf.mysql_conf import get_host_and_prop
-from ..conf import ODS
+import zion
 
 
 class MysqlExtractor(object):
+    """
+    从MySQL提取数据到hive 依赖 conf 中的 mysql_conf
+    """
 
-    def __init__(self, mysql_db, mysql_tb):
-        self.mysql_tb = mysql_tb
-        self.mysql_db = mysql_db
-        self.mysql_host, self.mysql_prop = get_host_and_prop(mysql_db)
+    def __init__(self, db, tb):
+        self.mysql_tb = tb
+        self.mysql_db = db
+        self.mysql_host, self.mysql_prop = get_host_and_prop(db)
 
     def _get_partition_upper_lower(self, host, user, password, db, tb, column):
         """
@@ -38,7 +41,13 @@ class MysqlExtractor(object):
             mm, mn = cur.fetchone()
         return mm + 1, mn
 
-    def gen_df(self, spark, partition_column=None, per_partition_num=4000000):
+    def gen_df(self, partition_column=None, per_partition_num=4000000):
+        """
+        生成df
+        :param partition_column: 用于分区的列名
+        :param per_partition_num:  每个分区多少条数据
+        :return:
+        """
         lowerBound = None
         upperBound = None
         numPartitions = None
@@ -52,33 +61,35 @@ class MysqlExtractor(object):
                                                                      self.mysql_db, self.mysql_tb, partition_column)
             numPartitions = (upperBound - lowerBound) / per_partition_num
 
-        df = spark.read.jdbc(url, "`%s`.`%s`" % (self.mysql_db, self.mysql_tb), properties=properties,
-                             column=partition_column,
-                             lowerBound=lowerBound,
-                             upperBound=upperBound, numPartitions=numPartitions)
+        df = zion.spark().read.jdbc(url, "`%s`.`%s`" % (self.mysql_db, self.mysql_tb), properties=properties,
+                                    column=partition_column,
+                                    lowerBound=lowerBound,
+                                    upperBound=upperBound, numPartitions=numPartitions)
         return df
 
-    def extract_to_hive(self, spark, date='', hive_tb_name_fun=lambda tb: 'ods_' + tb,
-                        partition_column=None, per_partition_num=4000000):
+    def extract_to_hive(self, date=None, partition_column=None, per_partition_num=None,
+                        hive_tb_name_fun=lambda tb: 'ods_' + tb):
         """
         mysql 到 hive
         :param per_partition_num:
-        :param spark:
         :param date: 用于date分区
         :param hive_tb_name_fun: 表名生成函数 会传入mysql tb做参数 默认加'ods_'前缀
         :param partition_column: 用于分区抽取数据的列
         :return:
         """
-        df = self.gen_df(spark, partition_column, per_partition_num)
+        if partition_column and not per_partition_num:
+            per_partition_num = 4000000
+
+        df = self.gen_df(partition_column, per_partition_num)
 
         df.registerTempTable("df")
-        hive_db_tb = ODS + "." + hive_tb_name_fun(self.mysql_tb)
+        hive_db_tb = zion.ODS + "." + hive_tb_name_fun(self.mysql_tb)
         try:
-            columns = spark.table(hive_db_tb).drop("date").columns
-            spark.sql("insert overwrite table %s select %s from df " % (
+            columns = zion.spark().table(hive_db_tb).drop("date").columns
+            zion.spark().sql("insert overwrite table %s select %s from df " % (
                 hive_db_tb + (" partition(date='%s') " % date if date else ''), ",".join(columns)))
         except Exception as e:
-            if hive_db_tb in [ODS + "." + i.name for i in spark.catalog.listTables(dbName=ODS)]:
+            if hive_db_tb in [zion.ODS + "." + i.name for i in zion.spark().catalog.listTables(dbName=zion.ODS)]:
                 raise e
             else:
                 if date:
